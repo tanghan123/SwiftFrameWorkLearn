@@ -1,0 +1,6 @@
+framework module Pods_RactiveCocoaMethod {
+  umbrella header "Pods-RactiveCocoaMethod-umbrella.h"
+
+  export *
+  module * { export * }
+}

@@ -1,0 +1,8 @@
+source 'https://github.com/CocoaPods/specs.git'
+platform :ios, ’10.0'
+use_frameworks!
+
+target "RactiveCocoaMethod" do
+
+pod 'ReactiveCocoa','~> 9.0'
+end

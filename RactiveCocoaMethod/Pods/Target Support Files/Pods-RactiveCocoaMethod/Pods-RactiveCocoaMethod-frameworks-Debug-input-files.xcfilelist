@@ -1,0 +1,4 @@
+${PODS_ROOT}/Target Support Files/Pods-RactiveCocoaMethod/Pods-RactiveCocoaMethod-frameworks.sh
+${BUILT_PRODUCTS_DIR}/ReactiveCocoa/ReactiveCocoa.framework
+${BUILT_PRODUCTS_DIR}/ReactiveSwift/ReactiveSwift.framework
+${BUILT_PRODUCTS_DIR}/Result/Result.framework
