@@ -5,6 +5,7 @@
 //  Created by chaomeng on 2019/6/3.
 //  Copyright © 2019 Jacob. All rights reserved.
 //
+// 文章来源  https://juejin.im/post/5a30cc6c6fb9a04522077ed3#heading-4
 
 import UIKit
 import ReactiveCocoa
@@ -481,14 +482,14 @@ extension ViewController {
 //        producer1.startWithResult(action: )
 //        producer1.startWithXXX...各种便利函数
         
-//        但事实上这里会发生两次网络请求, 但这不是一个bug, 这是一个feature.
-//        SignalProducer的一个特性是, 每次被订阅就会执行一次初始化时保存的闭包. 所以如果你有类似一次执行, 多处订阅的需求, 你应该选择Signal而不是SignalProducer. 所以, 符合需求的代码可能是这样:
+//
 //
         func fetchData(completionHandler: (Int, Error?) -> ()) {
             print("发起网络请求")
             completionHandler(1, nil)
         }
         
+        // 第一种实现方法 会执行2次网络请求
         let producer = Producer<Int> { (innerObserver, _) in
             fetchData(completionHandler: { (data, error) in
                 innerObserver.send(value: data)
@@ -501,11 +502,53 @@ extension ViewController {
         producer.startWithValues { (value) in
             print("did received value: \(value)")
         }
-        
 //        输出: 发起网络请求
 //        did received value: 1
 //        发起网络请求
 //        did received value: 1
+        //  但事实上这里会发生两次网络请求, 但这不是一个bug, 这是一个feature.
+        //        SignalProducer的一个特性是, 每次被订阅就会执行一次初始化时保存的闭包. 所以如果你有类似一次执行, 多处订阅的需求, 你应该选择Signal而不是SignalProducer. 所以, 符合需求的代码可能是这样:
+        
+        // 符合需求的代码可能是这样
+        let signalTuple = NSignal<Int>.pipe()
+        signalTuple.output.observeValues { (value) in
+            print("did received value :\(value)")
+        }
+        
+        signalTuple.output.observeValues { (value) in
+            print("did received value :\(value)")
+        }
+        
+        fetchData { (data, error) in
+            signalTuple.input.send(value: data)
+            signalTuple.input.sendCompleted()
+        }
+        // 正确输出
+        //         发起网络请求
+        //         did received value :1
+        //         did received value :1
+    }
+}
+
+// 自定义错误类型来表示这些错误，
+struct APIError:Swift.Error {
+    let code : Int
+    var reason = ""
+}
+
+// 利用别名让代码简洁一些。
+typealias NSignal1<T> = ReactiveSwift.Signal<T ,NoError>
+typealias APISignal<T> = ReactiveSwift.Signal<T , APIError>
+
+typealias Producer<T> = ReactiveSwift.SignalProducer<T , NoError>
+typealias APIProducer<T> = ReactiveSwift.SignalProducer<T, APIError>
+
+
+//这是因为默认的SignalProducer是没有startWithValues函数的, ReactiveSwift会在Extension里给它加上startWithValues函数, 但是这只对NoError有效, 所以当你在自定义Error时, 请记得加上类似的代码.
+extension SignalProducer where Error == APIError {
+    @discardableResult
+    func startWithValues(_ action : @escaping (Value) -> Void) -> Disposable {
+        return start(Signal.Observer.init(value: action))
     }
 }
 
@@ -605,9 +648,97 @@ extension  ViewController {
 // public final class Action<Input, Output, Error: Swift.Error>
 //public convenience init(execute: @escaping (Input) -> SignalProducer<Output, Error>)
 
-//typealias APIAction<O> = ReactiveSwift.Action<[String: String]?, O, APIError>
+typealias APIAction<O> = ReactiveSwift.Action<[String: String]?, O, APIError>
 extension ViewController {
+    func creatAction() {
+        // 创建一个Action输入类型[string:string]？输出类型为Int，错误类型为APIError
+        let action  = APIAction<Int>.init { (input) -> SignalProducer<Int, APIError> in
+            print("input  \(String(describing: input))")
+            return APIProducer.init({ (innerObserver, _) in
+                
+                // 发起网嵝请求
+                innerObserver.send(value: 1)
+                DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + 10, execute: {
+                    innerObserver.send(value: 2)
+                    innerObserver.sendCompleted()
+                })
+            })
+        }
+        
+        // 订阅Action的执行事件
+        action.events.observe { print("did received Event :\($0)")}
+        
+        // 订阅Action的各种输出事件
+        action.values.observeValues { print("did recived valie:\($0)")}
+        action.errors.observeValues { print("did received error:\($0)")}
+        action.completed.observeValues { print("did received completed \($0)") }
+        
+        // 执行Action 开始输出
+        action.apply(["1":"obse"]).start()
+        
+        // 在返回的producer还没结束前继续执行action，什么也不会输出
+        for i in 0...10 {
+            action.apply([String(i):"num"]).start()
+        }
+        // 输出
+//        input  Optional(["1": "obse"])
+//        did recived valie:1
+//        did received Event :VALUE VALUE 1
+//             ....十秒后....
+//        did recived valie:2
+//        did received Event :VALUE VALUE 2
+//        did received completed ()
+//        did received Event :VALUE COMPLETED
+//        did received Event :COMPLETED
+    }
     
 }
 
+//上面的代码主要描述以下信息:
+//通过闭包execute: (Input) -> SignalProducer 创建一个Action, 我们可以通过execute.input获取来自订阅者的输入, 然后我们需要返回一个SignalProducer, SignalProducer封装了事件的获取/发送逻辑.
+//通过Action.events可以订阅Action本身的事件, 此时的Event.Value还是一个Event.
+//通过Action.values/errors/completed可以订阅初始化闭包中返回的SignalProducer的各种事件, 我们可以订阅这些事件对返回的结果做相应的处理.
+//通过action.apply(input).start()提供输入信息并执行Action.
+//在返回的Producer还未结束前执行Action是没用的, 只有上一个返回的Producer无效后, Action才能再次执行. (这个特性用来处理按钮的多次点击发送网络请求非常有用.)
 
+
+//这个函数通过外部传入的Property来控制Action的可执行与否, 我们可以用它来做较为精准的状态控制.
+//public convenience init<P: PropertyProtocol>(enabledIf isEnabled: P, execute: @escaping (Input) -> SignalProducer<Output, Error>) where P.Value == Bool
+
+extension ViewController {
+    func  creatAction2()  {
+        var executeButton : UIButton {
+            let item = UIButton.init(type: .system)
+            item.frame = CGRect(x: 20, y: 200, width: 100, height: 44)
+            item.setTitle("button", for: .normal)
+            return item
+        }
+        view.addSubview(executeButton)
+        // 创建一个MutableProperty<Bool>的状态控制器，
+        let enabled = MutableProperty(false)
+        // 有输入才能发起请求
+        enabled <~ username.reactive.continuousTextValues.map({ (str) -> Bool in
+            return str.count  >  0
+        })
+        
+        // 传入状态控制信号即可
+        let action = APIAction<Int>.init(enabledIf: enabled) { (input) -> SignalProducer<Int, APIError> in
+            print("input \(String(describing: input))")
+            
+            return APIProducer.init({ (innerObserver, _) in
+                DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + 2, execute: {
+                    innerObserver.send(value: 1)
+                    innerObserver.sendCompleted()
+                })
+            })
+        }
+        
+        action.values.observeValues { (value) in
+            print("did received value :\(value)")
+        }
+        
+        executeButton.reactive.controlEvents(.touchUpInside).observeValues { (sender) in
+            action.apply(["1":"2"]).start()
+        }
+    }
+}

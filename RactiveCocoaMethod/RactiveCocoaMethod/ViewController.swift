@@ -41,7 +41,7 @@ class ViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
        
-       addtextFiled()
+       creatAction2()
     }
 }
 
